@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QVIS 本地跟单终端</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+
+  <!-- ═══ Header ═══════════════════════════════════════════ -->
+  <header class="app-header">
+    <div class="app-header-brand">
+      <div class="app-logo">QV</div>
+      <h1>QVIS 跟单终端</h1>
+      <p class="sub">币安 API Key 与签名请求仅在浏览器本机完成；平台仅通过 Client API 推送模拟成交与任务状态</p>
+    </div>
+    <div class="header-right">
+      <button id="btn-theme" title="切换明暗主题">☾</button>
+    </div>
+  </header>
+
+  <!-- ═══ Page body: Sidebar + Main ════════════════════════ -->
+  <div class="page-body">
+
+    <!-- ──── LEFT SIDEBAR: Settings ──────────────────────── -->
+    <aside class="sidebar">
+
+      <!-- ① 连接配置触发卡 -->
+      <div class="conn-trigger card" id="btn-open-conn" role="button" tabindex="0" title="点击打开连接配置">
+        <div class="card-header">
+          <h2><span class="step-tag">01</span>连接配置</h2>
+          <span id="conn-badge" class="badge badge-muted">未连接</span>
+        </div>
+        <div class="conn-trigger-body">
+          <div class="conn-trigger-keys">
+            <span id="key-val-qvis-trigger" class="badge badge-muted">QVIS 未验证</span>
+            <span id="key-val-binance-trigger" class="badge badge-muted">币安 未验证</span>
+          </div>
+          <span class="conn-trigger-arrow">配置 →</span>
+        </div>
+      </div>
+
+      <!-- ② 交易参数 -->
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="step-tag">02</span>交易参数</h2>
+        </div>
+        <div class="card-body">
+
+          <div class="field">
+            <label for="slippage">最大滑点（相对模拟推送价）</label>
+            <input id="slippage" type="number" step="0.0001" min="0" max="0.5" value="0.001" />
+            <p class="hint"><strong>0.001 = 0.1%</strong>。计算方式：|盘口中间价 − 模拟推送价| ÷ 模拟推送价，超过则整笔跳过。</p>
+          </div>
+
+          <div class="field field-real-trading">
+            <label class="inline-check" for="real-trading-enabled">
+              <input type="checkbox" id="real-trading-enabled" checked />
+              <span>真实下单（勾选则向币安发单；取消仅打印日志，用于演练）</span>
+            </label>
+          </div>
+
+          <div class="field field-perp-leverage-prominent">
+            <label for="perp-leverage">U 本位合约杠杆（1–125）</label>
+            <input id="perp-leverage" type="number" min="1" max="125" step="1" value="3" />
+            <p class="hint">仅<strong>实盘跟单</strong>时生效。连接 WebSocket 后对每个 symbol 调用 <code>set_leverage</code>。</p>
+          </div>
+
+          <details class="exchange-details" id="advanced-order-settings">
+            <summary>高级下单参数（现货 / U 本位）</summary>
+            <div class="exchange-advanced-body">
+
+              <!-- Tab bar -->
+              <div class="adv-tabs">
+                <button class="adv-tab active" data-adv-tab="spot">现货 Spot</button>
+                <button class="adv-tab" data-adv-tab="perp">U 本位 Perp</button>
+              </div>
+
+              <!-- 现货 panel -->
+              <div class="adv-panel" data-adv-panel="spot">
+                <div class="row-2">
+                  <div class="field">
+                    <label for="spot-open-type">开仓方式</label>
+                    <select id="spot-open-type">
+                      <option value="MARKET" selected>MARKET</option>
+                      <option value="LIMIT">LIMIT</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="spot-close-type">平仓方式</label>
+                    <select id="spot-close-type">
+                      <option value="LIMIT" selected>LIMIT</option>
+                      <option value="MARKET">MARKET</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="row-2">
+                  <div class="field">
+                    <label for="spot-open-seconds">开仓等待（秒）</label>
+                    <input id="spot-open-seconds" type="number" min="5" step="1" value="120" />
+                  </div>
+                  <div class="field">
+                    <label for="spot-close-seconds">平仓等待（秒）</label>
+                    <input id="spot-close-seconds" type="number" min="5" step="1" value="120" />
+                  </div>
+                </div>
+                <div class="row-2">
+                  <div class="field">
+                    <label for="spot-open-slippage">开仓允许偏离</label>
+                    <input id="spot-open-slippage" type="number" step="0.0001" min="0" value="0.001" />
+                  </div>
+                  <div class="field">
+                    <label for="spot-close-slippage">平仓允许偏离</label>
+                    <input id="spot-close-slippage" type="number" step="0.0001" min="0" value="0.001" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="inline-check">
+                    <input type="checkbox" id="spot-open-mkt-after" checked />
+                    开仓限价超时后改市价（<code>open_market_after_limit</code>）
+                  </label>
+                </div>
+              </div>
+
+              <!-- U 本位 panel -->
+              <div class="adv-panel hidden" data-adv-panel="perp">
+                <div class="row-2">
+                  <div class="field">
+                    <label for="perp-open-type">开仓方式</label>
+                    <select id="perp-open-type">
+                      <option value="MARKET" selected>MARKET</option>
+                      <option value="LIMIT">LIMIT</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="perp-close-type">平仓方式</label>
+                    <select id="perp-close-type">
+                      <option value="LIMIT" selected>LIMIT</option>
+                      <option value="MARKET">MARKET</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="row-2">
+                  <div class="field">
+                    <label for="perp-open-seconds">开仓等待（秒）</label>
+                    <input id="perp-open-seconds" type="number" min="5" step="1" value="120" />
+                  </div>
+                  <div class="field">
+                    <label for="perp-close-seconds">平仓等待（秒）</label>
+                    <input id="perp-close-seconds" type="number" min="5" step="1" value="120" />
+                  </div>
+                </div>
+                <div class="row-2">
+                  <div class="field">
+                    <label for="perp-open-slippage">开仓允许偏离</label>
+                    <input id="perp-open-slippage" type="number" step="0.0001" min="0" value="0.001" />
+                  </div>
+                  <div class="field">
+                    <label for="perp-close-slippage">平仓允许偏离</label>
+                    <input id="perp-close-slippage" type="number" step="0.0001" min="0" value="0.001" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="inline-check">
+                    <input type="checkbox" id="perp-open-mkt-after" checked />
+                    开仓限价超时后改市价
+                  </label>
+                </div>
+              </div>
+
+            </div>
+          </details>
+
+        </div>
+      </div>
+
+    </aside>
+
+    <!-- ──── RIGHT MAIN: Live data ────────────────────────── -->
+    <main class="main-area">
+
+      <!-- ③ WebSocket -->
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="step-tag">03</span>WebSocket 订阅</h2>
+          <span id="ws-badge" class="badge badge-muted">未订阅</span>
+        </div>
+        <div class="card-body">
+
+          <p class="ws-hint">
+            在下方<strong>运行中模拟实盘</strong>表格勾选要订阅的任务（同一 <code>trading_pair_id</code> 仅能选一个）。
+            连接成功后<strong>每分钟</strong>在日志输出连接时长与本地订单汇总。
+          </p>
+          <p class="ws-hint" id="task-hint">请先点击「拉取模拟任务」。</p>
+
+          <div class="ws-toolbar">
+            <button type="button" class="btn btn-primary" id="btn-ws-connect">连接并订阅</button>
+            <button type="button" class="btn btn-ghost" id="btn-ws-disconnect">断开</button>
+          </div>
+
+          <div class="log-wrap">
+            <div class="log-label">事件日志</div>
+            <div id="log-panel" class="log-panel" aria-live="polite"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- 运行中模拟实盘 -->
+      <div class="card">
+        <div class="card-header">
+          <h2>运行中模拟实盘</h2>
+          <button class="btn btn-ghost btn-icon" id="btn-refresh-tasks" title="刷新任务列表" onclick="onRefreshTasks()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+              <path d="M21 3v5h-5"/>
+              <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+              <path d="M3 21v-5h5"/>
+            </svg>
+          </button>
+        </div>
+        <div class="table-wrap">
+          <table class="data" id="tbl-tasks">
+            <thead>
+              <tr>
+              <th class="col-subscribe">订阅</th>
+              <th>task_id</th>
+              <th>策略</th>
+              <th>交易对</th>
+              <th>Kline</th>
+              <th>connector</th>
+              <th>杠杆</th>
+              <th>收益率</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- 本地交易所订单 -->
+      <div class="card">
+        <div class="card-header">
+          <h2>本地交易所订单</h2>
+          <span style="font-size:9.5px;color:var(--text-muted);font-family:var(--mono);">RealLiveTradeItem</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data" id="tbl-orders">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>task</th>
+                <th>模拟类型</th>
+                <th>connector</th>
+                <th>symbol</th>
+                <th>状态</th>
+                <th>交易所订单号</th>
+                <th>成交量</th>
+                <th>成交额</th>
+                <th>手续费</th>
+                <th>错误</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+    </main>
+
+  </div><!-- .page-body -->
+
+  <!-- ══ Modal：连接配置 ══════════════════════════════════ -->
+  <div class="modal-overlay" id="conn-modal" hidden aria-modal="true" role="dialog">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title"><span class="step-tag">01</span>连接配置</h2>
+        <button class="modal-close" id="btn-close-conn" title="关闭">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="lt-connection-form" autocomplete="on" onsubmit="return false">
+
+          <div class="field">
+            <label for="platform-key">平台 Client API Key（qvis_…）</label>
+            <input id="platform-key" name="qvis_client_api_key" type="password" autocomplete="off" />
+          </div>
+
+          <div class="field">
+            <label for="binance-upstream-proxy">币安出境 HTTP 代理（可选）</label>
+            <input id="binance-upstream-proxy" name="binance_upstream_proxy" type="url"
+              placeholder="http://127.0.0.1:7890" autocomplete="off" />
+            <p class="hint">填写 Clash / V2Ray 等<strong>本地 HTTP 代理</strong>。失焦或点击「验证密钥」后会<strong>自动记入本机</strong>，也可在终端设置 <code>HTTPS_PROXY</code>。</p>
+          </div>
+
+          <div class="row-2">
+            <div class="field">
+              <label for="binance-key">币安 API Key</label>
+              <input id="binance-key" name="binance_api_key" type="password" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="binance-secret">币安 Secret</label>
+              <input id="binance-secret" name="binance_api_secret" type="password" autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="verify-hint">
+            <p class="verify-hint-title"><strong>须先通过「验证密钥」</strong></p>
+            <ul class="verify-hint-list">
+              <li>QVIS Key 须能拉模拟任务（<code>api.qvis.ai</code>）</li>
+              <li>币安 Key 在现货与 U 本位两侧各下一笔远离市价的限价买单并立即撤销，以确认 TRADE 权限</li>
+              <li>拉取任务后<strong>仅 connector 与已验证侧一致的任务可勾选</strong></li>
+              <li>修改任何 Key 或代理后须重新验证</li>
+            </ul>
+          </div>
+
+          <div class="modal-verify-row">
+            <button type="button" class="btn btn-primary" id="btn-verify-keys">验证密钥</button>
+            <span id="key-val-qvis" class="badge badge-muted">QVIS 未验证</span>
+            <span id="key-val-binance" class="badge badge-muted">币安 未验证</span>
+          </div>
+
+          <div class="toolbar" style="margin-top: 12px;">
+            <button type="button" class="btn btn-primary" id="btn-save">保存到本地</button>
+            <button type="button" class="btn btn-ghost" id="btn-clear">清除密钥</button>
+            <button type="button" class="btn btn-primary" id="btn-refresh-tasks">拉取模拟任务</button>
+          </div>
+
+        </form>
+
+        <!-- 迷你日志镜像 -->
+        <div class="modal-log-wrap">
+          <div class="modal-log-label">最新日志</div>
+          <div class="modal-log-mini" id="modal-log-mini"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+  <script>
+    /* Theme toggle */
+    const btnTheme = document.getElementById('btn-theme');
+    const applyTheme = (light) => {
+      document.documentElement.setAttribute('data-theme', light ? 'light' : '');
+      btnTheme.textContent = light ? '☀' : '☾';
+    };
+    if (localStorage.getItem('qvis-theme') === 'light') applyTheme(true);
+    btnTheme.addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-theme') !== 'light';
+      applyTheme(next);
+      localStorage.setItem('qvis-theme', next ? 'light' : '');
+    });
+
+    /* ── Connection config modal ── */
+    const connModal    = document.getElementById('conn-modal');
+    const btnOpenConn  = document.getElementById('btn-open-conn');
+    const btnCloseConn = document.getElementById('btn-close-conn');
+
+    const openConn = () => {
+      connModal.hidden = false;
+      document.body.style.overflow = 'hidden';
+    };
+    const closeConn = () => {
+      connModal.hidden = true;
+      document.body.style.overflow = '';
+    };
+
+    btnOpenConn.addEventListener('click', openConn);
+    btnOpenConn.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') openConn(); });
+    btnCloseConn.addEventListener('click', closeConn);
+    connModal.addEventListener('click', e => { if (e.target === connModal) closeConn(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !connModal.hidden) closeConn(); });
+
+    /* ── Badge 镜像：Modal 内 badge → 触发卡 badge 实时同步 ── */
+    const syncBadge = (srcId, dstId) => {
+      const src = document.getElementById(srcId);
+      const dst = document.getElementById(dstId);
+      if (!src || !dst) return;
+      const sync = () => { dst.className = src.className; dst.textContent = src.textContent; };
+      sync(); // 初始同步
+      new MutationObserver(sync).observe(src, { attributes: true, characterData: true, childList: true, subtree: true });
+    };
+    syncBadge('key-val-qvis',     'key-val-qvis-trigger');
+    syncBadge('key-val-binance',  'key-val-binance-trigger');
+
+    /* ── 迷你日志镜像：实时追加最新日志到 Modal 内 ── */
+    const logPanel  = document.getElementById('log-panel');
+    const miniLog   = document.getElementById('modal-log-mini');
+    const MAX_MINI  = 6; // 显示最新 N 条
+
+    const refreshMiniLog = () => {
+      const lines = logPanel.querySelectorAll('.line');
+      const slice = Array.from(lines).slice(-MAX_MINI);
+      miniLog.innerHTML = '';
+      slice.forEach(l => {
+        const clone = l.cloneNode(true);
+        miniLog.appendChild(clone);
+      });
+      miniLog.scrollTop = miniLog.scrollHeight;
+    };
+
+    new MutationObserver(refreshMiniLog).observe(logPanel, { childList: true, subtree: true });
+    refreshMiniLog();
+
+    /* Advanced order settings — tab switcher */
+    document.querySelectorAll('.adv-tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        const key = tab.dataset.advTab;
+        tab.closest('.adv-tabs').querySelectorAll('.adv-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        tab.closest('.exchange-advanced-body').querySelectorAll('.adv-panel').forEach(p => {
+          p.classList.toggle('hidden', p.dataset.advPanel !== key);
+        });
+      });
+    });
+  </script>
+
+  <!-- ── 仓位分配弹窗 ── -->
+  <div id="alloc-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="alloc-modal-title">
+    <div class="modal" style="max-width:500px;width:94%">
+      <div class="modal-header">
+        <span class="modal-title" id="alloc-modal-title">仓位分配</span>
+        <button class="modal-close" id="alloc-modal-close" aria-label="关闭">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="alloc-hint">为每个订阅策略设置占账户总资产的仓位比例。合计建议 ≤ 90%，余量留作手续费与波动缓冲。</p>
+        <div id="alloc-rows"></div>
+        <div class="alloc-total-row">
+          <span class="alloc-total-label">合计仓位</span>
+          <span id="alloc-total-pct" class="alloc-total-value">0%</span>
+        </div>
+        <div class="alloc-actions">
+          <button class="btn btn-ghost" id="alloc-cancel-btn" style="flex:1">取消</button>
+          <button class="btn btn-primary" id="alloc-confirm-btn" style="flex:2">确认并连接</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

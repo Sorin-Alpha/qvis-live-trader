@@ -1,0 +1,64 @@
+{
+  "name": "qvis-live-trader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "QVIS 本地跟单终端：一键启动币安代理 + 静态页",
+  "main": "electron/main.cjs",
+  "author": "",
+  "dependencies": {
+    "https-proxy-agent": "^7.0.6"
+  },
+  "scripts": {
+    "start": "node start-dev.mjs",
+    "proxy": "node tools/binance-cors-proxy.mjs",
+    "serve": "npx --yes serve -l 5173 .",
+    "electron": "node scripts/run-with-safe-node-options.mjs electron",
+    "electron:dev": "node scripts/run-with-safe-node-options.mjs electron",
+    "dist:win": "node scripts/run-with-safe-node-options.mjs electron-builder --win portable && node scripts/apply-win-icon.mjs",
+    "dist:win:dir": "node scripts/run-with-safe-node-options.mjs electron-builder --win dir && node scripts/apply-win-icon.mjs",
+    "dist:mac": "node scripts/run-with-safe-node-options.mjs electron-builder --mac",
+    "dist:mac:dir": "node scripts/run-with-safe-node-options.mjs electron-builder --mac dir"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "rcedit": "^4.0.1"
+  },
+  "build": {
+    "appId": "com.qvis.live-trader",
+    "productName": "QVIS跟单终端",
+    "copyright": "",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "index.html",
+      "css/**/*",
+      "js/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "icon": "build/icon.ico",
+    "mac": {
+      "category": "public.app-category.finance",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    }
+  }
+}
