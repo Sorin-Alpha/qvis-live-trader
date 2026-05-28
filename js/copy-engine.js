@@ -137,7 +137,18 @@ export async function handleSimTradeFill(payload, opts) {
     return null;
   }
 
-  const { connector, symbol } = meta;
+  const isPortfolio =
+    String(payload.task_type || meta.task_type || "").toLowerCase() === "portfolio";
+  const connector = String(trade.connector || meta.connector || "").toLowerCase();
+  const symbol = String(trade.symbol || meta.symbol || "").toUpperCase();
+  if (!connector) {
+    opts.log?.(`[task ${taskId}] 缺少 connector，已跳过`, "err");
+    return null;
+  }
+  if (!symbol || symbol === "（多币种）") {
+    opts.log?.(`[task ${taskId}] 缺少成交 symbol，已跳过`);
+    return null;
+  }
   const kind = classifySimType(trade.type);
   if (kind === "other") {
     opts.log?.(`[task ${taskId}] 未知成交类型 ${trade.type}，跳过`);
@@ -150,8 +161,12 @@ export async function handleSimTradeFill(payload, opts) {
   }
 
   const st = stateFor(Number(taskId));
-  const simAfter = Math.abs(Number(trade.position_after || 0));
-  if (simAfter < EPS) st.awaitingSimZero = false;
+  if (isPortfolio) {
+    if (Number(trade.target_position_rate ?? 0) < EPS) st.awaitingSimZero = false;
+  } else {
+    const simAfter = Math.abs(Number(trade.position_after || 0));
+    if (simAfter < EPS) st.awaitingSimZero = false;
+  }
 
   let localQty = 0;
   try {
@@ -166,7 +181,7 @@ export async function handleSimTradeFill(payload, opts) {
     return null;
   }
 
-  if (kind === "open") {
+  if (!isPortfolio && kind === "open") {
     if (st.awaitingSimZero) {
       opts.log?.(`[task ${taskId}] 等待模拟仓位归零，跳过开仓类 ${trade.type}`);
       return null;
@@ -201,13 +216,16 @@ export async function handleSimTradeFill(payload, opts) {
 
   let maxPositionAmount;
   if (opts.taskAllocationPct?.has(Number(taskId))) {
-    // 用户自定义仓位比例
     maxPositionAmount = totalAssets * opts.taskAllocationPct.get(Number(taskId));
+  } else if (isPortfolio) {
+    maxPositionAmount = maxPositionSlicePerTask(totalAssets, 1);
   } else {
     const taskCount = Math.max(1, opts.subscribedTaskCount?.(connector) ?? 1);
     maxPositionAmount = maxPositionSlicePerTask(totalAssets, taskCount);
   }
-  const targetRate = inferSimTargetPositionRate(trade, meta);
+  const targetRate = isPortfolio
+    ? Math.min(1, Math.max(0, Number(trade.target_position_rate ?? 0)))
+    : inferSimTargetPositionRate(trade, meta);
 
   const simPx = Number(trade.price);
   const book = await getBookTicker(symbol, connector, opts.creds.proxyBase);
@@ -329,7 +347,9 @@ export async function handleSimTradeFill(payload, opts) {
 
   const allocDesc = opts.taskAllocationPct?.has(Number(taskId))
     ? `自定义仓位 ${(opts.taskAllocationPct.get(Number(taskId)) * 100).toFixed(0)}%`
-    : `自动均分 → 切片`;
+    : isPortfolio
+      ? `Portfolio 默认切片`
+      : `自动均分 → 切片`;
   opts.log?.(
     `[task ${taskId}] 资金估算 ${totalAssets.toFixed(2)} USDT | ${allocDesc} ${maxPositionAmount.toFixed(2)} USDT | ` +
       `sim_target_rate≈${targetRate.toFixed(4)} | 计划下单 ${side} qty=${actualQty} (${connector} ${isClose ? closeType : openType})`

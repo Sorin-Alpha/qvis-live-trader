@@ -38,8 +38,13 @@ export async function fetchRunningSimulated(apiRoot, platformApiKey) {
   return j;
 }
 
-export async function fetchTaskDetail(apiRoot, platformApiKey, taskId) {
-  const url = `${normalizeApiRoot(apiRoot)}/api/v1/client-api/simulated/live-tasks/${taskId}/detail`;
+export async function fetchTaskDetail(apiRoot, platformApiKey, taskId, taskType = "live") {
+  const tt = String(taskType || "live").toLowerCase();
+  const path =
+    tt === "portfolio"
+      ? `/api/v1/client-api/simulated/portfolio-tasks/${taskId}/detail`
+      : `/api/v1/client-api/simulated/live-tasks/${taskId}/detail`;
+  const url = `${normalizeApiRoot(apiRoot)}${path}`;
   const r = await fetch(url, {
     headers: { Authorization: `Bearer ${platformApiKey}` },
   });

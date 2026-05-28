@@ -43,11 +43,15 @@ const taskMetaCache = new Map();
 let wsSubscribedTaskIds = [];
 
 function subscribedTaskCountForConnector(connector) {
+  let hasPortfolio = false;
   let n = 0;
   for (const tid of wsSubscribedTaskIds) {
     const m = taskMetaCache.get(tid);
-    if (m && m.connector === connector) n += 1;
+    if (!m) continue;
+    if (m.task_type === "portfolio") hasPortfolio = true;
+    if (m.connector === connector) n += 1;
   }
+  if (hasPortfolio && connector === "binance_perpetual") return 1;
   return Math.max(1, n);
 }
 
@@ -109,12 +113,34 @@ let wsConnectedAt = 0;
 /** @type {Map<number,number>} */
 let wsTaskAllocations = new Map();
 
+function taskTypeLabel(taskType) {
+  const t = String(taskType || "live").toLowerCase();
+  return t === "portfolio" ? "Portfolio" : "单币";
+}
+
 // ── 自动重连 ──────────────────────────────────────────────
 let wsUserDisconnected = false;   // 用户主动断开时置 true，跳过自动重连
 let wsReconnectTimer   = null;    // 重连延时句柄
 let wsReconnectAttempt = 0;       // 当前重连次数（1-based）
 // 每次重连的等待秒数，共 11 次，超出后放弃
 const WS_RECONNECT_SCHEDULE = [2, 4, 8, 16, 30, 60, 120, 240, 480, 960, 1800];
+/** 连接序号：旧连接的 onClose 与新连接并发时用于判断是否已过期 */
+let _wsSerial = 0;
+/** 最近一次连接使用的 task_types，供断线重连时 DOM 已清空时兜底 */
+let wsLastTaskTypes = {};
+
+function refreshWsActionButtons() {
+  const connectBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById("btn-ws-connect"));
+  const disconnectBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById("btn-ws-disconnect"));
+  if (!connectBtn || !disconnectBtn) return;
+  const rs = wsHandle?.ws?.readyState;
+  const connectedOrConnecting = rs === WebSocket.OPEN || rs === WebSocket.CONNECTING;
+  const reconnecting = !!wsReconnectTimer;
+  let gateOk = false;
+  try { gateOk = keysValidationGateOk(readForm()); } catch { gateOk = false; }
+  connectBtn.disabled = !gateOk || connectedOrConnecting || reconnecting;
+  disconnectBtn.disabled = !(connectedOrConnecting || reconnecting);
+}
 
 const orderSessionStats = {
   total: 0,
@@ -231,13 +257,18 @@ function renderTasks(items) {
   const spotOk = fpMatch && s.keysValidationBinanceSpotOk;
   const perpOk = fpMatch && s.keysValidationBinancePerpOk;
 
+  const localPerpLeverage = Math.max(1, Math.min(125, Math.floor(Number($("perp-leverage").value) || 1)));
+
   for (const it of items) {
+    const taskType = String(it.task_type || "live").toLowerCase();
     const conn = String(it.connector || "").toLowerCase();
     const supported =
       conn === "binance" ? spotOk : conn === "binance_perpetual" ? perpOk : false;
     const disAttr = supported ? "" : " disabled";
     const title = supported
-      ? "订阅该任务的模拟成交通知"
+      ? taskType === "portfolio"
+        ? "订阅 Portfolio 组合调仓成交通知（不可与单币任务同时订阅）"
+        : "订阅该任务的模拟成交通知"
       : "当前币安密钥未通过该侧（现货 / U 本位）限价探测，无法订阅；请重新验证或更换 Key";
     const tr = document.createElement("tr");
     const kline = it.kline_interval != null ? `${it.kline_interval}m` : "—";
@@ -252,16 +283,19 @@ function renderTasks(items) {
         cls: pct > 0 ? "roi-pos" : pct < 0 ? "roi-neg" : "",
       };
     })();
+    const leverageDisplay =
+      taskType === "portfolio" ? `${localPerpLeverage}（本地）` : (it.leverage ?? "—");
     tr.innerHTML = `
       <td class="col-subscribe">
-        <input type="checkbox" data-task-id="${it.id}" data-tpair-id="${it.trading_pair_id}" title="${escapeHtml(title)}"${disAttr} />
+        <input type="checkbox" data-task-id="${it.id}" data-task-type="${taskType}" data-tpair-id="${it.trading_pair_id}" title="${escapeHtml(title)}"${disAttr} />
       </td>
       <td>${it.id}</td>
+      <td>${escapeHtml(taskTypeLabel(taskType))}</td>
       <td>${escapeHtml(it.strategy_name || "—")}</td>
       <td>${escapeHtml(it.symbol || "—")}</td>
       <td style="font-family:var(--mono,monospace);font-size:12px">${kline}</td>
       <td>${escapeHtml(it.connector || "—")}</td>
-      <td>${it.leverage ?? "—"}</td>
+      <td>${escapeHtml(leverageDisplay)}</td>
       <td class="${roi.cls}" style="font-family:var(--mono,monospace);font-weight:600">${roi.text}</td>
     `;
     tb.appendChild(tr);
@@ -271,7 +305,11 @@ function renderTasks(items) {
       tr.querySelector("input[type=checkbox]").checked = true;
     }
 
+    const inp = tr.querySelector("input[type='checkbox']");
+    inp?.addEventListener("change", () => enforceSubscribeExclusivity(inp));
+
     taskMetaCache.set(Number(it.id), {
+      task_type: taskType,
       connector: it.connector,
       symbol: it.symbol,
       strategy_name: it.strategy_name || "",
@@ -297,20 +335,81 @@ function selectedSubscribeIds() {
   const ids = [];
   /** @type {Set<number>} */
   const pairs = new Set();
+  let portfolioCount = 0;
+  let liveCount = 0;
   document
     .querySelectorAll("#tbl-tasks tbody input[type='checkbox'][data-task-id]:not(:disabled)")
     .forEach((el) => {
       const inp = /** @type {HTMLInputElement} */ (el);
       if (!inp.checked) return;
       const tid = Number(inp.dataset.taskId);
-      const tpid = Number(inp.dataset.tpairId);
-      if (pairs.has(tpid)) {
-        throw new Error(`交易对重复：不能同时订阅多个 task 使用同一 trading_pair_id=${tpid}`);
+      const taskType = String(inp.dataset.taskType || "live").toLowerCase();
+      if (taskType === "portfolio") {
+        portfolioCount += 1;
+      } else {
+        liveCount += 1;
+        const tpid = Number(inp.dataset.tpairId);
+        if (pairs.has(tpid)) {
+          throw new Error(`交易对重复：不能同时订阅多个 task 使用同一 trading_pair_id=${tpid}`);
+        }
+        pairs.add(tpid);
       }
-      pairs.add(tpid);
       ids.push(tid);
     });
+  if (portfolioCount > 0 && liveCount > 0) {
+    throw new Error("Portfolio 组合任务不能与单币模拟实盘任务同时订阅");
+  }
+  if (portfolioCount > 1) {
+    throw new Error("Portfolio 组合任务一次只能订阅一个");
+  }
   return ids;
+}
+
+function selectedSubscribeTaskTypes() {
+  /** @type {Record<string, string>} */
+  const types = {};
+  document
+    .querySelectorAll("#tbl-tasks tbody input[type='checkbox'][data-task-id]:not(:disabled)")
+    .forEach((el) => {
+      const inp = /** @type {HTMLInputElement} */ (el);
+      if (!inp.checked) return;
+      const tid = Number(inp.dataset.taskId);
+      const taskType = String(inp.dataset.taskType || "live").toLowerCase();
+      if (Number.isFinite(tid) && (taskType === "live" || taskType === "portfolio")) {
+        types[String(tid)] = taskType;
+      }
+    });
+  return types;
+}
+
+function enforceSubscribeExclusivity(changedInput) {
+  const checked = [
+    ...document.querySelectorAll("#tbl-tasks tbody input[type='checkbox'][data-task-id]:checked:not(:disabled)"),
+  ];
+  if (!checked.length) return;
+  const changedType = changedInput ? String(changedInput.dataset.taskType || "live") : "";
+  const types = checked.map((el) => String(/** @type {HTMLInputElement} */ (el).dataset.taskType || "live"));
+  const hasPortfolio = types.includes("portfolio");
+  const hasLive = types.some((t) => t === "live");
+  if (hasPortfolio && hasLive) {
+    for (const el of checked) {
+      const inp = /** @type {HTMLInputElement} */ (el);
+      const tt = String(inp.dataset.taskType || "live");
+      if (tt !== changedType) inp.checked = false;
+    }
+    log("Portfolio 与单币模拟任务不能同时订阅，已取消另一侧勾选", "err");
+    return;
+  }
+  const portChecked = checked.filter(
+    (el) => String(/** @type {HTMLInputElement} */ (el).dataset.taskType || "live") === "portfolio"
+  );
+  if (portChecked.length > 1) {
+    for (const el of portChecked) {
+      const inp = /** @type {HTMLInputElement} */ (el);
+      if (inp !== changedInput) inp.checked = false;
+    }
+    log("Portfolio 一次只能订阅一个任务", "err");
+  }
 }
 
 function prependOrderRow(row) {
@@ -345,12 +444,17 @@ function fmtNum(v) {
 
 async function getTaskMeta(taskId) {
   const cached = taskMetaCache.get(Number(taskId));
-  if (cached) return cached;
+  if (cached?.connector) return cached;
   const st = readForm();
   if (!st.platformApiKey) return null;
+  const domInp = document.querySelector(`#tbl-tasks input[data-task-id="${taskId}"]`);
+  const taskType =
+    cached?.task_type ||
+    (domInp ? String(/** @type {HTMLInputElement} */ (domInp).dataset.taskType || "live") : "live");
   try {
-    const d = await fetchTaskDetail(st.platformApiRoot, st.platformApiKey, taskId);
+    const d = await fetchTaskDetail(st.platformApiRoot, st.platformApiKey, taskId, taskType);
     const m = {
+      task_type: String(d.task_type || taskType || "live").toLowerCase(),
       connector: d.connector,
       symbol: d.symbol,
       leverage: Number(d.leverage || 1),
@@ -419,6 +523,8 @@ function refreshGateButtons() {
   const st = readForm();
   const ok = keysValidationGateOk(st);
   $("btn-refresh-tasks").disabled = !ok;
+  const iconBtn = /** @type {HTMLButtonElement|null} */ (document.getElementById("btn-refresh-tasks-icon"));
+  if (iconBtn) iconBtn.disabled = !ok;
   $("btn-ws-connect").disabled = !ok;
 }
 
@@ -522,7 +628,12 @@ async function onRefreshTasks() {
       const c = String(it.connector || "").toLowerCase();
       return c === "binance" ? sk : c === "binance_perpetual" ? pk : false;
     }).length;
-    log(`已加载 ${items.length} 个运行中模拟任务（当前密钥可订阅其中 ${sub} 个）`, "ok");
+    const portN = items.filter((it) => String(it.task_type || "").toLowerCase() === "portfolio").length;
+    const liveN = items.length - portN;
+    log(
+      `已加载 ${items.length} 个运行中任务（单币 ${liveN} / Portfolio ${portN}，当前密钥可订阅 ${sub} 个）`,
+      "ok"
+    );
     setBadge("conn-badge", "已拉取", "badge-ok");
   } catch (e) {
     log(`拉取任务失败: ${e.message}`, "err");
@@ -530,28 +641,29 @@ async function onRefreshTasks() {
   }
 }
 
-function onWsDisconnect() {
-  wsUserDisconnected = true;
-  wsReconnectAttempt = 0;
+/** 内部：清理 WS 资源，不修改 wsUserDisconnected / wsReconnectAttempt */
+function _cleanupWs() {
   if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
-  if (pingTimer) {
-    clearInterval(pingTimer);
-    pingTimer = null;
-  }
-  if (heartbeatTimer) {
-    clearInterval(heartbeatTimer);
-    heartbeatTimer = null;
-  }
+  if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
   if (wsConnectedAt) {
     logWsHeartbeat();
-    log(`WebSocket 会话结束（断开），本次连接 ${formatConnectedDuration(Date.now() - wsConnectedAt)}`, "");
+    log(`WebSocket 会话结束，本次连接 ${formatConnectedDuration(Date.now() - wsConnectedAt)}`, "");
   }
   wsConnectedAt = 0;
   wsSubscribedTaskIds = [];
   const h = wsHandle;
   wsHandle = null;
   if (h) h.close();
+}
+
+/** 用户主动断开 */
+function onWsDisconnect() {
+  wsUserDisconnected = true;
+  wsReconnectAttempt = 0;
+  _cleanupWs();
   setBadge("ws-badge", "未连接", "badge-muted");
+  refreshWsActionButtons();
 }
 
 /** 前置校验，返回 taskIds 或 null（失败时已打日志） */
@@ -647,15 +759,20 @@ function updateAllocTotal() {
 
 /** 实际执行 WebSocket 连接（仓位分配确认后调用） */
 function doWsConnect(taskIds) {
-  wsUserDisconnected = false;
-  if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
-
-  onWsDisconnect();
+  wsUserDisconnected = false;          // 非用户主动，不能置 true
+  // 先 bump serial，使旧连接的 onClose 回调在 _cleanupWs 触发 h.close() 时立即失效
+  const mySerial = ++_wsSerial;
+  _cleanupWs();                        // 清理旧连接资源，不修改 wsUserDisconnected
   wsSubscribedTaskIds = [...taskIds];
   resetOrderSessionStats();
   setBadge("ws-badge", "连接中…", "badge-warn");
+  refreshWsActionButtons();
 
   const st = readForm();
+  // 优先读 DOM 勾选；重连时勾选可能已清空，则 fallback 到上次快照
+  const domTypes = selectedSubscribeTaskTypes();
+  const taskTypes = Object.keys(domTypes).length > 0 ? domTypes : wsLastTaskTypes;
+  wsLastTaskTypes = taskTypes;         // 持久化，供下次重连使用
 
   wsHandle = connectClientWs(st.platformApiRoot, st.platformApiKey, {
     onOpen: () => {
@@ -663,7 +780,8 @@ function doWsConnect(taskIds) {
       wsReconnectAttempt = 0;
       log("WebSocket 已连接", "ok");
       setBadge("ws-badge", "已连接", "badge-ok");
-      const payload = JSON.stringify({ op: "subscribe", task_ids: taskIds });
+      refreshWsActionButtons();
+      const payload = JSON.stringify({ op: "subscribe", task_ids: taskIds, task_types: taskTypes });
       wsHandle.ws.send(payload);
       log(`已发送订阅 task_ids: [${taskIds.join(", ")}]`, "ok");
       pingTimer = setInterval(() => {
@@ -696,14 +814,20 @@ function doWsConnect(taskIds) {
         return;
       }
       if (ev === "sim_trade_fill") {
-        log(`模拟成交 task=${data.task_id} trade_id=${data.trade?.id} type=${data.trade?.type}`);
+        const tt = String(data.task_type || "").toLowerCase();
+        const sym = data.trade?.symbol ? ` ${data.trade.symbol}` : "";
+        log(
+          `${tt === "portfolio" ? "Portfolio" : "模拟"}成交 task=${data.task_id}${sym} trade_id=${data.trade?.id} type=${data.trade?.type}`
+        );
         const creds = {
           apiKey: st.binanceApiKey,
           secret: st.binanceSecret,
           proxyBase: st.binanceProxy,
           upstreamProxy: st.binanceUpstreamProxy || "",
         };
-        const row = await handleSimTradeFill(data, {
+        const row = await handleSimTradeFill(
+          { ...data, task_type: data.task_type || taskMetaCache.get(Number(data.task_id))?.task_type },
+          {
           getTaskMeta,
           creds,
           risk: { maxSlippagePct: st.maxSlippagePct },
@@ -720,27 +844,30 @@ function doWsConnect(taskIds) {
       log(`消息: ${JSON.stringify(data)}`);
     },
     onClose: (e) => {
-      if (pingTimer) clearInterval(pingTimer);
-      pingTimer = null;
-      if (heartbeatTimer) clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
+      // 过期回调保护：若已建立新连接则忽略旧连接的 onClose
+      if (mySerial !== _wsSerial) return;
+
+      if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
+      if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
       if (wsConnectedAt) {
         logWsHeartbeat();
         log(`WebSocket 会话结束，本次连接 ${formatConnectedDuration(Date.now() - wsConnectedAt)}`, "");
       }
       wsConnectedAt = 0;
+      // 先快照再清空，保证重连时 snapIds 不为空
+      const snapIds = [...wsSubscribedTaskIds];
       wsSubscribedTaskIds = [];
       wsHandle = null;
+      refreshWsActionButtons();
       const reason = e.reason || `code=${e.code}`;
       log(`WebSocket 关闭: ${reason}`, e.code === 4000 ? "err" : "");
       setBadge("ws-badge", "已断开", "badge-muted");
 
-      // 4000 = 服务端主动踢出（鉴权/业务错误），用户手动断开 → 不重连
+      // 4000 = 服务端主动踢出，用户主动断开 → 不重连
       if (!wsUserDisconnected && e.code !== 4000) {
         wsReconnectAttempt += 1;
         const idx = wsReconnectAttempt - 1;
         if (idx >= WS_RECONNECT_SCHEDULE.length) {
-          // 超过最大重连次数，放弃
           log("已连续重连 11 次仍未成功，自动重连已停止，请手动点击「连接并订阅」重试。", "err");
           setBadge("ws-badge", "重连失败", "badge-err");
           wsReconnectAttempt = 0;
@@ -749,17 +876,18 @@ function doWsConnect(taskIds) {
           const total = WS_RECONNECT_SCHEDULE.length;
           log(`将在 ${delayS >= 60 ? (delayS / 60).toFixed(0) + "min" : delayS + "s"} 后自动重连（第 ${wsReconnectAttempt}/${total} 次）…`, "");
           setBadge("ws-badge", `重连中 ${wsReconnectAttempt}/${total}`, "badge-warn");
-          // 重连时保留上次 taskIds（onClose 清空前快照已存在 wsSubscribedTaskIds 外部引用）
-          const snapIds = [...wsSubscribedTaskIds];
           wsReconnectTimer = setTimeout(() => {
             wsReconnectTimer = null;
-            if (!wsUserDisconnected) doWsConnect(snapIds.length ? snapIds : wsSubscribedTaskIds);
+            refreshWsActionButtons();
+            if (!wsUserDisconnected) doWsConnect(snapIds);
           }, delayS * 1000);
+          refreshWsActionButtons();
         }
       }
     },
     onError: () => log("WebSocket error", "err"),
   });
+  refreshWsActionButtons();
 }
 
 async function onSave() {
@@ -798,6 +926,8 @@ function init() {
   $("btn-clear").addEventListener("click", () => onClear());
   $("btn-verify-keys").addEventListener("click", () => onVerifyKeys());
   $("btn-refresh-tasks").addEventListener("click", () => onRefreshTasks());
+  // 卡片右上角图标刷新按钮（不同 ID，避免重复）
+  document.getElementById("btn-refresh-tasks-icon")?.addEventListener("click", () => onRefreshTasks());
   $("btn-ws-connect").addEventListener("click", () => onWsConnect());
   $("btn-ws-disconnect").addEventListener("click", () => {
     onWsDisconnect();
@@ -816,12 +946,25 @@ function init() {
   });
   document.getElementById("alloc-confirm-btn").addEventListener("click", () => {
     // 读取每行的分配比例，存入 wsTaskAllocations
-    wsTaskAllocations = new Map();
+    const newAlloc = new Map();
+    let allocSum = 0;
+    let hasZero = false;
     document.querySelectorAll(".alloc-input").forEach(inp => {
       const tid = Number(inp.dataset.taskId);
       const pct = Math.max(0, Math.min(100, Number(inp.value) || 0));
-      wsTaskAllocations.set(tid, pct / 100);
+      if (pct <= 0) hasZero = true;
+      allocSum += pct;
+      newAlloc.set(tid, pct / 100);
     });
+    if (hasZero) {
+      log("仓位分配中存在 0%，请为每个任务设置大于 0 的比例后再确认。", "err");
+      return;
+    }
+    if (allocSum > 100) {
+      log(`仓位分配合计 ${allocSum}% 超过 100%，请调整后再确认。`, "err");
+      return;
+    }
+    wsTaskAllocations = newAlloc;
     closeAllocModal();
     // 拿最新校验过的 taskIds 执行真正连接
     const taskIds = preConnectCheck();
@@ -829,6 +972,7 @@ function init() {
   });
   updateKeyValidationBadges();
   refreshGateButtons();
+  refreshWsActionButtons();
   log("就绪。请填写密钥后点击「验证密钥」，再拉取任务并连接 WebSocket。", "ok");
 
   // 若 QVIS 已验证，自动拉取一次模拟任务

@@ -454,11 +454,46 @@ function isBenignOneWayModeError(e) {
   return false;
 }
 
+/** GET /fapi/v1/positionSide/dual */
+function isFuturesOneWayModeResponse(j) {
+  if (!j || typeof j !== "object") return false;
+  const v = j.dualSidePosition;
+  return v === false || v === "false";
+}
+
+export async function getFuturesPositionMode(apiKey, secret, proxyBase) {
+  return signedRequest("GET", "fapi", "/fapi/v1/positionSide/dual", {}, apiKey, secret, proxyBase);
+}
+
+/** POST 因挂单被拒时：若当前已是单向持仓则视为成功 */
+function isOpenOrdersBlocksPositionSideChange(e) {
+  const msg = String(e?.message || "").toLowerCase();
+  const bm = String(e?.body?.msg || "").toLowerCase();
+  const combined = `${msg} ${bm}`;
+  return (
+    combined.includes("position side cannot be changed") && combined.includes("open orders")
+  );
+}
+
 export async function setOneWayMode(apiKey, secret, proxyBase) {
+  try {
+    const cur = await getFuturesPositionMode(apiKey, secret, proxyBase);
+    if (isFuturesOneWayModeResponse(cur)) return;
+  } catch {
+    /* 查询失败则仍尝试 POST */
+  }
   try {
     await signedRequest("POST", "fapi", "/fapi/v1/positionSide/dual", { dualSidePosition: "false" }, apiKey, secret, proxyBase);
   } catch (e) {
     if (isBenignOneWayModeError(e)) return;
+    if (isOpenOrdersBlocksPositionSideChange(e)) {
+      try {
+        const again = await getFuturesPositionMode(apiKey, secret, proxyBase);
+        if (isFuturesOneWayModeResponse(again)) return;
+      } catch {
+        /* fall through */
+      }
+    }
     throw e;
   }
 }
