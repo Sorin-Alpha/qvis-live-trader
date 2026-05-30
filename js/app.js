@@ -55,28 +55,46 @@ function subscribedTaskCountForConnector(connector) {
   return Math.max(1, n);
 }
 
+function readMaxSlippagePct() {
+  return Number($("slippage").value) || DEFAULT_MAX_SLIPPAGE_PCT;
+}
+
+/** 开仓/平仓允许偏离与 02 最大滑点共用同一数值（界面不单独展示） */
+function syncExchangeSlippageFromMax(es, slip) {
+  const s = Number(slip);
+  const v = Number.isFinite(s) && s >= 0 ? s : DEFAULT_MAX_SLIPPAGE_PCT;
+  for (const key of ["binance", "binance_perpetual"]) {
+    if (!es[key]) es[key] = {};
+    es[key].open_order_slippage = v;
+    es[key].close_order_slippage = v;
+  }
+  return es;
+}
+
 function readExchangeSettingsFromDom() {
-  return {
+  const slip = readMaxSlippagePct();
+  const es = {
     binance: {
       open_order_type: $("spot-open-type").value,
       open_order_seconds: Number($("spot-open-seconds").value) || 120,
       open_market_after_limit: $("spot-open-mkt-after").checked,
-      open_order_slippage: Number($("spot-open-slippage").value) || 0.001,
+      open_order_slippage: slip,
       close_order_type: $("spot-close-type").value,
       close_order_seconds: Number($("spot-close-seconds").value) || 120,
-      close_order_slippage: Number($("spot-close-slippage").value) || 0.001,
+      close_order_slippage: slip,
     },
     binance_perpetual: {
       leverage: Math.max(1, Math.min(125, Math.floor(Number($("perp-leverage").value) || 3))),
       open_order_type: $("perp-open-type").value,
       open_order_seconds: Number($("perp-open-seconds").value) || 120,
       open_market_after_limit: $("perp-open-mkt-after").checked,
-      open_order_slippage: Number($("perp-open-slippage").value) || 0.001,
+      open_order_slippage: slip,
       close_order_type: $("perp-close-type").value,
       close_order_seconds: Number($("perp-close-seconds").value) || 120,
-      close_order_slippage: Number($("perp-close-slippage").value) || 0.001,
+      close_order_slippage: slip,
     },
   };
+  return syncExchangeSlippageFromMax(es, slip);
 }
 
 /** @param {{ binance?: object, binance_perpetual?: object }} es */
@@ -84,20 +102,16 @@ function applyExchangeSettingsToDom(es) {
   const b = es.binance || {};
   const p = es.binance_perpetual || {};
   $("spot-open-type").value = b.open_order_type || "MARKET";
-  $("spot-close-type").value = b.close_order_type || "LIMIT";
+  $("spot-close-type").value = b.close_order_type || "MARKET";
   $("spot-open-seconds").value = String(b.open_order_seconds ?? 120);
   $("spot-close-seconds").value = String(b.close_order_seconds ?? 120);
-  $("spot-open-slippage").value = String(b.open_order_slippage ?? 0.001);
-  $("spot-close-slippage").value = String(b.close_order_slippage ?? 0.001);
   $("spot-open-mkt-after").checked = !!b.open_market_after_limit;
 
   $("perp-leverage").value = String(p.leverage ?? 3);
   $("perp-open-type").value = p.open_order_type || "MARKET";
-  $("perp-close-type").value = p.close_order_type || "LIMIT";
+  $("perp-close-type").value = p.close_order_type || "MARKET";
   $("perp-open-seconds").value = String(p.open_order_seconds ?? 120);
   $("perp-close-seconds").value = String(p.close_order_seconds ?? 120);
-  $("perp-open-slippage").value = String(p.open_order_slippage ?? 0.001);
-  $("perp-close-slippage").value = String(p.close_order_slippage ?? 0.001);
   $("perp-open-mkt-after").checked = !!p.open_market_after_limit;
 }
 
@@ -221,8 +235,11 @@ function readForm() {
     binanceSecret: $("binance-secret").value.trim(),
     binanceProxy: BINANCE_CORS_PROXY_BASE,
     binanceUpstreamProxy: $("binance-upstream-proxy").value.trim(),
-    maxSlippagePct: Number($("slippage").value) || DEFAULT_MAX_SLIPPAGE_PCT,
-    exchangeSettings: mergeExchangeSettings(readExchangeSettingsFromDom()),
+    maxSlippagePct: readMaxSlippagePct(),
+    exchangeSettings: syncExchangeSlippageFromMax(
+      mergeExchangeSettings(readExchangeSettingsFromDom()),
+      readMaxSlippagePct()
+    ),
     realTradingEnabled: $("real-trading-enabled").checked,
   };
 }
@@ -232,11 +249,12 @@ function applyForm(s) {
   $("binance-key").value = s.binanceApiKey || "";
   $("binance-secret").value = s.binanceSecret || "";
   $("binance-upstream-proxy").value = s.binanceUpstreamProxy || "";
-  $("slippage").value = String(
-    Number.isFinite(s.maxSlippagePct) ? s.maxSlippagePct : DEFAULT_MAX_SLIPPAGE_PCT
-  );
+  const slip = Number.isFinite(s.maxSlippagePct) ? s.maxSlippagePct : DEFAULT_MAX_SLIPPAGE_PCT;
+  $("slippage").value = String(slip);
   $("real-trading-enabled").checked = s.realTradingEnabled !== false;
-  applyExchangeSettingsToDom(s.exchangeSettings || mergeExchangeSettings({}));
+  applyExchangeSettingsToDom(
+    syncExchangeSlippageFromMax(s.exchangeSettings || mergeExchangeSettings({}), slip)
+  );
 }
 
 function renderTasks(items) {

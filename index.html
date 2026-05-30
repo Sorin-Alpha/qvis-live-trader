@@ -53,7 +53,7 @@
           <div class="field">
             <label for="slippage">最大滑点（相对模拟推送价）</label>
             <input id="slippage" type="number" step="0.0001" min="0" max="0.5" value="0.001" />
-            <p class="hint"><strong>0.001 = 0.1%</strong>。计算方式：|盘口中间价 − 模拟推送价| ÷ 模拟推送价，超过则整笔跳过。</p>
+            <p class="hint"><strong>0.001 = 0.1%</strong>。用于：下单前整笔跳过（|盘口中间价 − 模拟价| ÷ 模拟价）、开仓/平仓限价与市价前的偏离校验。</p>
           </div>
 
           <div class="field field-real-trading">
@@ -92,8 +92,8 @@
                   <div class="field">
                     <label for="spot-close-type">平仓方式</label>
                     <select id="spot-close-type">
-                      <option value="LIMIT" selected>LIMIT</option>
-                      <option value="MARKET">MARKET</option>
+                      <option value="MARKET" selected>MARKET</option>
+                      <option value="LIMIT">LIMIT</option>
                     </select>
                   </div>
                 </div>
@@ -105,16 +105,6 @@
                   <div class="field">
                     <label for="spot-close-seconds">平仓等待（秒）</label>
                     <input id="spot-close-seconds" type="number" min="5" step="1" value="120" />
-                  </div>
-                </div>
-                <div class="row-2">
-                  <div class="field">
-                    <label for="spot-open-slippage">开仓允许偏离</label>
-                    <input id="spot-open-slippage" type="number" step="0.0001" min="0" value="0.001" />
-                  </div>
-                  <div class="field">
-                    <label for="spot-close-slippage">平仓允许偏离</label>
-                    <input id="spot-close-slippage" type="number" step="0.0001" min="0" value="0.001" />
                   </div>
                 </div>
                 <div class="field">
@@ -138,8 +128,8 @@
                   <div class="field">
                     <label for="perp-close-type">平仓方式</label>
                     <select id="perp-close-type">
-                      <option value="LIMIT" selected>LIMIT</option>
-                      <option value="MARKET">MARKET</option>
+                      <option value="MARKET" selected>MARKET</option>
+                      <option value="LIMIT">LIMIT</option>
                     </select>
                   </div>
                 </div>
@@ -151,16 +141,6 @@
                   <div class="field">
                     <label for="perp-close-seconds">平仓等待（秒）</label>
                     <input id="perp-close-seconds" type="number" min="5" step="1" value="120" />
-                  </div>
-                </div>
-                <div class="row-2">
-                  <div class="field">
-                    <label for="perp-open-slippage">开仓允许偏离</label>
-                    <input id="perp-open-slippage" type="number" step="0.0001" min="0" value="0.001" />
-                  </div>
-                  <div class="field">
-                    <label for="perp-close-slippage">平仓允许偏离</label>
-                    <input id="perp-close-slippage" type="number" step="0.0001" min="0" value="0.001" />
                   </div>
                 </div>
                 <div class="field">

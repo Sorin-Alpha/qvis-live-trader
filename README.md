@@ -292,7 +292,7 @@ npm run dist:mac
 | `open_order_seconds` | 限价单最长等待时间（秒），超时转市价 | `120` | 正整数 |
 | `open_market_after_limit` | 限价超时后是否自动转市价 | `true` | `true` / `false` |
 | `open_order_slippage` | 开仓允许最大滑点（0.001 = 0.1%） | `0.001` | 小数 |
-| `close_order_type` | 平仓类型 | `LIMIT` | `MARKET` / `LIMIT` |
+| `close_order_type` | 平仓类型 | `MARKET` | `MARKET` / `LIMIT` |
 | `close_order_seconds` | 平仓限价单最长等待时间（秒） | `120` | 正整数 |
 | `close_order_slippage` | 平仓允许最大滑点 | `0.001` | 小数 |
 

@@ -332,8 +332,8 @@ export async function handleSimTradeFill(payload, opts) {
   const side = mapSide(trade.type, connector);
   const reduceOnly = connector !== "binance" && isClose;
 
-  const openType = String(exSet.open_order_type || "LIMIT").toUpperCase();
-  const closeType = String(exSet.close_order_type || "LIMIT").toUpperCase();
+  const openType = String(exSet.open_order_type || "MARKET").toUpperCase();
+  const closeType = String(exSet.close_order_type || "MARKET").toUpperCase();
   const openSec = Math.max(5, Number(exSet.open_order_seconds) || 120);
   const closeSec = Math.max(5, Number(exSet.close_order_seconds) || 120);
   const openSlip = Number(exSet.open_order_slippage ?? 0.001);
