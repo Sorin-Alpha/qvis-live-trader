@@ -23,9 +23,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: |
-            dist-electron/*-portable.exe
-            dist-electron/win-unpacked/*.exe
+          path: dist-electron/*-portable.exe
 
   publish:
     needs: [build-win]
