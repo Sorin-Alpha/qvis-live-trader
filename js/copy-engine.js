@@ -104,7 +104,8 @@ function resolveActualQtyClose(_tradeTypeForQty, currentAbsPosition, targetQtyAb
   let quantized = quantizeToStepDown(qtyToClose, step);
   if (!(quantized > 0)) return 0;
   const remainQty = cap - quantized;
-  if (remainQty > 0 && remainQty * px < mn * 0.999) {
+  // 剩余仓位不足总仓位 1%，或剩余名义低于 minNotional → 合并全平
+  if (remainQty > 0 && (remainQty / cap < 0.01 || remainQty * px < mn * 0.999)) {
     quantized = quantizeToStepDown(cap, step);
   }
   if (quantized > cap) quantized = quantizeToStepDown(cap, step);
@@ -498,7 +499,32 @@ export async function handleSimTradeFill(payload, opts) {
       error_msg: null,
     };
   } catch (e) {
-    opts.log?.(`[task ${taskId}] 下单失败: ${e.message}`, "err");
+    const errMsg = String(e.message || e);
+    const errCode = String(e?.body?.code ?? "");
+    // ReduceOnly 被拒（-2021）：仓位已在信号到达前被平掉（爆仓/手动/并发），
+    // 目标状态（无仓）已达成，记为完成而非失败，避免误报
+    if (errCode === "-2021" || /reduceonly order is rejected/i.test(errMsg)) {
+      opts.log?.(`[task ${taskId}] ReduceOnly 被拒（仓位已提前平仓），视为已完成`, "ok");
+      return {
+        id: trade.id,
+        task_id: Number(taskId),
+        timestamp: trade.timestamp,
+        type: trade.type,
+        price: trade.price,
+        quantity: trade.quantity,
+        connector,
+        symbol,
+        order_status: "filled",
+        exchange_order_id: "—",
+        filled_qty: 0,
+        filled_amount: 0,
+        exchange_fee: 0,
+        realized_pnl_usdt: null,
+        order_updated_at: new Date().toISOString(),
+        error_msg: null,
+      };
+    }
+    opts.log?.(`[task ${taskId}] 下单失败: ${errMsg}`, "err");
     return {
       id: trade.id,
       task_id: Number(taskId),
@@ -515,7 +541,7 @@ export async function handleSimTradeFill(payload, opts) {
       exchange_fee: null,
       realized_pnl_usdt: null,
       order_updated_at: new Date().toISOString(),
-      error_msg: String(e.message || e),
+      error_msg: errMsg,
     };
   }
   });

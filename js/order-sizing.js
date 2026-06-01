@@ -20,7 +20,9 @@ export function maxPositionSlicePerTask(totalAssetsUsdt, taskCount) {
  */
 export function inferSimTargetPositionRate(trade, meta) {
   const px = Number(trade.price || 0);
-  const pos = Number(trade.position_after ?? 0);
+  const rawPos = Number(trade.position_after ?? 0);
+  // 极小浮点残值视为全平（< 1e-8 当作 0）
+  const pos = Math.abs(rawPos) < 1e-8 ? 0 : rawPos;
   const cash = Number(trade.cash_after ?? 0);
   if (!(px > 0)) return 0;
   const equity = cash + pos * px;
