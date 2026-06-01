@@ -18,23 +18,28 @@ const MIME = {
 };
 
 /**
- * @param {string} root 应用静态根目录（含 index.html）
+ * @param {string|string[]} roots 静态根目录；数组时按顺序优先（前者覆盖后者）
  * @param {number} port
  * @returns {Promise<import('node:http').Server>}
  */
-function startStaticServer(root, port) {
-  const rootNorm = path.resolve(root);
+function startStaticServer(roots, port) {
+  const rootList = (Array.isArray(roots) ? roots : [roots]).map((r) => path.resolve(r));
 
-  function safeFile(reqPath) {
+  function safeRel(reqPath) {
     const decoded = decodeURIComponent(reqPath.split("?")[0] || "/");
     let rel = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
     rel = path.normalize(rel).replace(/^(\.\.(\/|\\|$))+/, "");
-    const full = path.resolve(rootNorm, rel);
-    const relToRoot = path.relative(rootNorm, full);
-    if (relToRoot.startsWith("..") || path.isAbsolute(relToRoot)) {
-      return null;
+    return rel;
+  }
+
+  function resolveFile(rel) {
+    for (const rootNorm of rootList) {
+      const full = path.resolve(rootNorm, rel);
+      const relToRoot = path.relative(rootNorm, full);
+      if (relToRoot.startsWith("..") || path.isAbsolute(relToRoot)) continue;
+      if (fs.existsSync(full) && fs.statSync(full).isFile()) return full;
     }
-    return full;
+    return null;
   }
 
   return new Promise((resolve, reject) => {
@@ -45,27 +50,26 @@ function startStaticServer(root, port) {
         return;
       }
       const u = new URL(req.url || "/", "http://127.0.0.1");
-      const filePath = safeFile(u.pathname);
-      if (!filePath) {
+      const rel = safeRel(u.pathname);
+      if (!rel) {
         res.writeHead(403);
         res.end("Forbidden");
         return;
       }
-      fs.stat(filePath, (err, st) => {
-        if (err || !st.isFile()) {
-          res.writeHead(404);
-          res.end("Not found");
-          return;
-        }
-        const ext = path.extname(filePath).toLowerCase();
-        const type = MIME[ext] || "application/octet-stream";
-        res.writeHead(200, { "Content-Type": type });
-        if (req.method === "HEAD") {
-          res.end();
-          return;
-        }
-        fs.createReadStream(filePath).pipe(res);
-      });
+      const filePath = resolveFile(rel);
+      if (!filePath) {
+        res.writeHead(404);
+        res.end("Not found");
+        return;
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const type = MIME[ext] || "application/octet-stream";
+      res.writeHead(200, { "Content-Type": type });
+      if (req.method === "HEAD") {
+        res.end();
+        return;
+      }
+      fs.createReadStream(filePath).pipe(res);
     });
 
     const onListenErr = (err) => {
@@ -75,7 +79,8 @@ function startStaticServer(root, port) {
     server.once("error", onListenErr);
     server.listen(port, "127.0.0.1", () => {
       server.removeListener("error", onListenErr);
-      console.error(`[QVIS] Static UI http://127.0.0.1:${port}/`);
+      const label = rootList.length > 1 ? `${rootList.length} roots` : rootList[0];
+      console.error(`[QVIS] Static UI http://127.0.0.1:${port}/ (${label})`);
       resolve(server);
     });
   });

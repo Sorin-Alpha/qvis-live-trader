@@ -5,6 +5,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { startBinanceProxyAsync } = require("./proxy-server.cjs");
 const { startStaticServer } = require("./static-server.cjs");
+const { checkAndApplyUiUpdate, getUiDir } = require("./update-manager.cjs");
 
 const PROXY_PORT = Number(process.env.PROXY_PORT || process.env.QVIS_PROXY_PORT || 8787);
 const STATIC_PORT = Number(process.env.QVIS_WEB_PORT || 5199);
@@ -29,12 +30,12 @@ async function bindProxyWithFallback() {
 }
 
 /** @returns {Promise<{ server: import('node:http').Server; port: number }>} */
-async function bindStaticWithFallback(root) {
+async function bindStaticWithFallback(roots) {
   const maxTry = 15;
   for (let i = 0; i < maxTry; i++) {
     const p = STATIC_PORT + i;
     try {
-      const server = await startStaticServer(root, p);
+      const server = await startStaticServer(roots, p);
       if (i > 0) {
         console.warn(`[QVIS] 端口 ${STATIC_PORT} 已被占用，静态页已改用 ${p}`);
       }
@@ -53,6 +54,16 @@ function getAppRoot() {
     return app.getAppPath();
   }
   return path.join(__dirname, "..");
+}
+
+/** 静态资源根：热更新目录优先，其次 asar 内置 */
+function getStaticRoots() {
+  const bundled = getAppRoot();
+  const uiDir = getUiDir();
+  if (fs.existsSync(path.join(uiDir, "index.html"))) {
+    return [uiDir, bundled];
+  }
+  return [bundled];
 }
 
 let mainWindow = null;
@@ -120,9 +131,26 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
-    const root = getAppRoot();
     let proxyPort = PROXY_PORT;
     let staticPort = STATIC_PORT;
+
+    const updateResult = await checkAndApplyUiUpdate();
+    if (updateResult.applied) {
+      await dialog.showMessageBox({
+        type: "info",
+        title: "界面已更新",
+        message: `已自动更新到 v${updateResult.version}`,
+        detail: "本次更新仅包含界面与跟单逻辑，无需重新下载程序。",
+      });
+    } else if (updateResult.skippedReason === "shell-too-old" && updateResult.error) {
+      await dialog.showMessageBox({
+        type: "warning",
+        title: "需要更新程序",
+        message: updateResult.error,
+        detail: "请从 GitHub Releases 下载最新版安装包后重新安装。",
+      });
+    }
+
     try {
       const r = await bindProxyWithFallback();
       proxyServer = r.server;
@@ -137,7 +165,7 @@ if (!gotLock) {
     }
 
     try {
-      const s = await bindStaticWithFallback(root);
+      const s = await bindStaticWithFallback(getStaticRoots());
       staticServer = s.server;
       staticPort = s.port;
     } catch (e) {

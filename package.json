@@ -1,11 +1,18 @@
 {
   "name": "qvis-live-trader",
-  "version": "1.2.1",
+  "version": "1.2.3",
   "private": true,
   "description": "QVIS 本地跟单终端：一键启动币安代理 + 静态页",
   "main": "electron/main.cjs",
   "author": "",
+  "qvisUpdate": {
+    "manifestUrl": "https://github.com/Sorin-Alpha/qvis-live-trader/releases/latest/download/manifest.json",
+    "githubRepo": "Sorin-Alpha/qvis-live-trader",
+    "minShellVersion": "1.2.3",
+    "allowedHosts": []
+  },
   "dependencies": {
+    "adm-zip": "^0.5.16",
     "https-proxy-agent": "^7.0.6"
   },
   "scripts": {
@@ -17,7 +24,8 @@
     "dist:win": "node scripts/run-with-safe-node-options.mjs electron-builder --win portable && node scripts/apply-win-icon.mjs",
     "dist:win:dir": "node scripts/run-with-safe-node-options.mjs electron-builder --win dir && node scripts/apply-win-icon.mjs",
     "dist:mac": "node scripts/run-with-safe-node-options.mjs electron-builder --mac",
-    "dist:mac:dir": "node scripts/run-with-safe-node-options.mjs electron-builder --mac dir"
+    "dist:mac:dir": "node scripts/run-with-safe-node-options.mjs electron-builder --mac dir",
+    "build:ui-bundle": "node scripts/build-ui-bundle.mjs"
   },
   "devDependencies": {
     "electron": "^33.2.1",

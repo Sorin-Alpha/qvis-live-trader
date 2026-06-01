@@ -19,11 +19,15 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
+      - run: npm run build:ui-bundle
       - run: npm run dist:win
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: dist-electron/*-portable.exe
+          path: |
+            dist-electron/*-portable.exe
+            dist-electron/ui-*.zip
+            dist-electron/manifest.json
 
   publish:
     needs: [build-win]
