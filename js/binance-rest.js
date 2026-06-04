@@ -177,13 +177,18 @@ function ts() {
 
 /**
  * @param {Record<string,string|number>} params
+ * @param {boolean} [encodeValues] GET/DELETE query 须 URL 编码（中文 symbol 等），POST body 保持原样。
  */
-async function signParams(secret, params) {
+async function signParams(secret, params, encodeValues = false) {
   const p = { ...params, timestamp: ts(), recvWindow: 60000 };
   const keys = Object.keys(p).sort();
-  // 与 Python BinanceClient._request 一致：sorted keys + key=value 直连（不做 encodeURIComponent），
-  // HMAC 明文须与 POST body / GET query 发送内容一致（币安典型 ASCII 参数下与 URL 编码形式相同）。
-  const qs = keys.map((k) => `${k}=${String(p[k])}`).join("&");
+  const qs = keys
+    .map((k) =>
+      encodeValues
+        ? `${encodeURIComponent(k)}=${encodeURIComponent(String(p[k]))}`
+        : `${k}=${String(p[k])}`
+    )
+    .join("&");
   const sig = await hmacSha256Hex(secret, qs);
   return `${qs}&signature=${sig}`;
 }
@@ -199,9 +204,10 @@ export async function signedRequest(method, kind, path, params, apiKey, secret, 
     "Content-Type": "application/x-www-form-urlencoded",
   };
   let lastErr;
+  const encodeQuery = method === "GET" || method === "DELETE";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const body = await signParams(secret, params);
+      const body = await signParams(secret, params, encodeQuery);
       if (method === "GET") {
         const url = `${base}?${body}`;
         return await rawFetch(url, { method: "GET", headers: { "X-MBX-APIKEY": apiKey } }, proxyBase);
@@ -332,11 +338,12 @@ export function stringifyBinanceQty(qty) {
 
 export async function getBookTicker(symbol, connector, proxyBase) {
   const sym = symbol.toUpperCase();
+  const q = encodeURIComponent(sym);
   if (connector === "binance") {
-    const url = `${proxiedPath(proxyBase, "spot", "/api/v3/ticker/bookTicker")}?symbol=${sym}`;
+    const url = `${proxiedPath(proxyBase, "spot", "/api/v3/ticker/bookTicker")}?symbol=${q}`;
     return rawFetch(url, { method: "GET" }, proxyBase);
   }
-  const url = `${proxiedPath(proxyBase, "fapi", "/fapi/v1/ticker/bookTicker")}?symbol=${sym}`;
+  const url = `${proxiedPath(proxyBase, "fapi", "/fapi/v1/ticker/bookTicker")}?symbol=${q}`;
   return rawFetch(url, { method: "GET" }, proxyBase);
 }
 
@@ -423,11 +430,25 @@ export async function getSpotBaseTotal(symbol, apiKey, secret, proxyBase) {
   return Number(b?.free || 0) + Number(b?.locked || 0);
 }
 
+/** 合约：全量持仓（签名 query 不含 symbol，避免 GET 中文 symbol 与 HMAC URL 编码不一致）。 */
+export async function getFuturesPositionRiskAll(apiKey, secret, proxyBase) {
+  return signedRequest("GET", "fapi", "/fapi/v3/positionRisk", {}, apiKey, secret, proxyBase);
+}
+
+function findFuturesPositionRow(rows, symbol) {
+  const sym = String(symbol || "").toUpperCase();
+  return (Array.isArray(rows) ? rows : []).find((r) => r.symbol === sym) || {};
+}
+
+/** 合约：单交易对 positionRisk 行（positionAmt、entryPrice 等）。 */
+export async function getFuturesPositionRow(symbol, apiKey, secret, proxyBase) {
+  const rows = await getFuturesPositionRiskAll(apiKey, secret, proxyBase);
+  return findFuturesPositionRow(rows, symbol);
+}
+
 /** 合约：positionAmt */
 export async function getFuturesPositionAmt(symbol, apiKey, secret, proxyBase) {
-  const sym = symbol.toUpperCase();
-  const rows = await signedRequest("GET", "fapi", "/fapi/v3/positionRisk", { symbol: sym }, apiKey, secret, proxyBase);
-  const row = (Array.isArray(rows) ? rows : []).find((r) => r.symbol === sym) || {};
+  const row = await getFuturesPositionRow(symbol, apiKey, secret, proxyBase);
   return Number(row.positionAmt || 0);
 }
 
@@ -652,7 +673,7 @@ export async function verifyBinancePerpLimitTrade(apiKey, secret, proxyBase) {
   }
   if (!(qFinal > 0) || !(pFinal > 0)) {
     throw new Error(
-      "无法满足合约最小名义金额（100 USDT 与交易对规则取大），无法构造探测单"
+      `无法满足合约最小名义金额（${VALIDATE_PERP_MIN_NOTIONAL_FLOOR} USDT 与交易对规则取大），无法构造探测单`
     );
   }
 

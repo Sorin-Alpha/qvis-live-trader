@@ -8,7 +8,7 @@ import {
   getBookTicker,
   getExchangeInfoFutures,
   getExchangeInfoSpot,
-  getFuturesPositionAmt,
+  getFuturesPositionRow,
   getSpotBaseTotal,
   lotFilter,
   placeFuturesLimitOrderWithRetry,
@@ -16,7 +16,6 @@ import {
   placeSpotLimitOrderWithRetry,
   setLeverage,
   setOneWayMode,
-  signedRequest,
   summarizeFuturesResult,
   summarizeSpotFull,
   withBinanceUpstreamProxy,
@@ -170,12 +169,14 @@ export async function handleSimTradeFill(payload, opts) {
   }
 
   let localQty = 0;
+  let localPositionRow = null;
   try {
     await opts.syncTime?.();
     if (connector === "binance") {
       localQty = await getSpotBaseTotal(symbol, opts.creds.apiKey, opts.creds.secret, opts.creds.proxyBase);
     } else {
-      localQty = await getFuturesPositionAmt(symbol, opts.creds.apiKey, opts.creds.secret, opts.creds.proxyBase);
+      localPositionRow = await getFuturesPositionRow(symbol, opts.creds.apiKey, opts.creds.secret, opts.creds.proxyBase);
+      localQty = Number(localPositionRow.positionAmt || 0);
     }
   } catch (e) {
     opts.log?.(`[task ${taskId}] 同步本地仓位失败: ${e.message}`, "err");
@@ -257,16 +258,7 @@ export async function handleSimTradeFill(payload, opts) {
   if (connector === "binance") {
     if (Math.abs(currentPosition) > EPS) currentEntryPrice = currentPrice;
   } else {
-    const pr = await signedRequest(
-      "GET",
-      "fapi",
-      "/fapi/v3/positionRisk",
-      { symbol: symbol.toUpperCase() },
-      opts.creds.apiKey,
-      opts.creds.secret,
-      opts.creds.proxyBase
-    );
-    const row = (Array.isArray(pr) ? pr : []).find((r) => r.symbol === symbol.toUpperCase()) || {};
+    const row = localPositionRow ?? {};
     currentPosition = Number(row.positionAmt || currentPosition);
     currentEntryPrice = Number(row.entryPrice || 0) || currentPrice;
     if (Math.abs(currentPosition) > EPS && !(currentEntryPrice > 0)) currentEntryPrice = currentPrice;
