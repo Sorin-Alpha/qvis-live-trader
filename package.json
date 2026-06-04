@@ -1,6 +1,6 @@
 {
   "name": "qvis-live-trader",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "private": true,
   "description": "QVIS 本地跟单终端：一键启动币安代理 + 静态页",
   "main": "electron/main.cjs",
