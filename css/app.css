@@ -335,7 +335,8 @@ body > * { position: relative; z-index: 1; }
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm); overflow: hidden;
 }
-.exchange-details summary {
+.exchange-details summary,
+.exchange-details .exchange-summary {
   cursor: pointer; padding: 8px 12px;
   font-size: 11.5px; color: var(--text-dim);
   list-style: none; display: flex; align-items: center;
@@ -343,13 +344,16 @@ body > * { position: relative; z-index: 1; }
   user-select: none; transition: color .15s, background .15s;
 }
 .exchange-details summary::-webkit-details-marker { display: none; }
-.exchange-details summary::after {
+.exchange-details summary::after,
+.exchange-details .exchange-summary::after {
   content: '▶'; font-size: 13px; color: var(--accent);
   transition: transform .2s; flex-shrink: 0;
   filter: drop-shadow(0 0 4px var(--accent));
 }
-.exchange-details[open] summary::after { transform: rotate(90deg); }
-.exchange-details summary:hover { color: var(--text); background: var(--surface-elevated); }
+.exchange-details[open] summary::after,
+.exchange-details.open .exchange-summary::after { transform: rotate(90deg); }
+.exchange-details summary:hover,
+.exchange-details .exchange-summary:hover { color: var(--text); background: var(--surface-elevated); }
 .exchange-advanced-body {
   padding: 10px 12px 12px;
   border-top: 1px solid var(--border-default);

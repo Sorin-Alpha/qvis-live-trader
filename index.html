@@ -69,9 +69,9 @@
             <p class="hint">仅<strong>实盘跟单</strong>时生效。连接 WebSocket 后对每个 symbol 调用 <code>set_leverage</code>。</p>
           </div>
 
-          <details class="exchange-details" id="advanced-order-settings">
-            <summary>高级下单参数（现货 / U 本位）</summary>
-            <div class="exchange-advanced-body">
+          <div class="exchange-details" id="advanced-order-settings">
+            <div class="exchange-summary" role="button" tabindex="0">高级下单参数（现货 / U 本位）</div>
+            <div class="exchange-advanced-body" hidden>
 
               <!-- Tab bar -->
               <div class="adv-tabs">
@@ -152,7 +152,7 @@
               </div>
 
             </div>
-          </details>
+          </div>
 
         </div>
       </div>
@@ -386,6 +386,20 @@
 
     new MutationObserver(refreshMiniLog).observe(logPanel, { childList: true, subtree: true });
     refreshMiniLog();
+
+    /* Advanced order settings — expand/collapse toggle */
+    const advDetails = document.getElementById('advanced-order-settings');
+    const advSummary = advDetails && advDetails.querySelector('.exchange-summary');
+    const advBody    = advDetails && advDetails.querySelector('.exchange-advanced-body');
+    if (advSummary && advBody) {
+      const toggleAdv = () => {
+        const open = advDetails.classList.toggle('open');
+        advBody.hidden = !open;
+        advSummary.setAttribute('aria-expanded', String(open));
+      };
+      advSummary.addEventListener('click', toggleAdv);
+      advSummary.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleAdv(); } });
+    }
 
     /* Advanced order settings — tab switcher */
     document.querySelectorAll('.adv-tab').forEach(tab => {
