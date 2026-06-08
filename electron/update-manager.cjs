@@ -289,6 +289,22 @@ async function checkAndApplyUiUpdate() {
     return { applied: false, skippedReason: "env-skip" };
   }
 
+  // 若用户下载了更新的 exe（bundled 版本 > uiDir 版本），
+  // 清除旧 uiDir，让新 exe 自带的 bundled UI 生效，
+  // 避免旧热更新目录遮盖更新的打包内容。
+  const uiDir = getUiDir();
+  const bundledVersion = getBundledUiVersion();
+  const uiDirVersionFile = path.join(uiDir, VERSION_FILE);
+  const uiDirIndex = path.join(uiDir, "index.html");
+  if (fs.existsSync(uiDirIndex)) {
+    const stored = readJsonSafe(uiDirVersionFile);
+    const uiDirVersion = stored?.version ? String(stored.version) : null;
+    if (uiDirVersion && compareSemver(bundledVersion, uiDirVersion) > 0) {
+      console.log(`[QVIS] bundled ${bundledVersion} > uiDir ${uiDirVersion}，清除旧热更新目录`);
+      rmDirRecursive(uiDir);
+    }
+  }
+
   const manifestUrl = getManifestUrl();
   if (!manifestUrl) {
     return { applied: false, skippedReason: "no-manifest-url" };

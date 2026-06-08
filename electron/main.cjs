@@ -149,6 +149,14 @@ if (!gotLock) {
         message: updateResult.error,
         detail: "请从 GitHub Releases 下载最新版安装包后重新安装。",
       });
+    } else if (updateResult.error && updateResult.skippedReason !== "shell-too-old-suppressed") {
+      await dialog.showMessageBox({
+        type: "warning",
+        title: "界面更新失败",
+        message: "自动更新界面时遇到问题，当前使用本地缓存版本。",
+        detail: `原因：${updateResult.error}\n\n如长期无法更新，可尝试：\n1. 检查网络（GitHub 需可访问）\n2. 从官网重新下载最新版 exe`,
+        buttons: ["知道了"],
+      });
     }
 
     try {
