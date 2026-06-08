@@ -157,6 +157,24 @@ body > * { position: relative; z-index: 1; }
 
 .header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
+/* ─── App version badge ──────────────────────────────── */
+.app-version-badge {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-default);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  user-select: none;
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.app-version-badge:hover { opacity: 1; }
+
 /* ─── Theme toggle ───────────────────────────────────────── */
 #btn-theme {
   display: flex; align-items: center; justify-content: center;

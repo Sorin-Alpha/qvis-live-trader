@@ -36,6 +36,11 @@ addDir(zip, "js", "js");
 addDir(zip, "css", "css");
 zip.writeZip(zipPath);
 
+// 在项目根目录写 version.json，供 bundled（未热更新）时 /version.json 路由使用
+const versionJson = JSON.stringify({ version, updatedAt: new Date().toISOString() }, null, 2);
+fs.writeFileSync(path.join(root, "version.json"), versionJson, "utf8");
+console.log(`[build-ui-bundle] version.json written to project root (${version})`);
+
 const sha256 = crypto.createHash("sha256").update(fs.readFileSync(zipPath)).digest("hex");
 
 const minShell = pkg.qvisUpdate?.minShellVersion || version;

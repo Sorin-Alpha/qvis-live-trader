@@ -18,6 +18,7 @@
       <p class="sub">币安 API Key 与签名请求仅在浏览器本机完成；平台仅通过 Client API 推送模拟成交与任务状态</p>
     </div>
     <div class="header-right">
+      <span id="app-version" class="app-version-badge" title="当前 UI 版本">—</span>
       <button id="btn-theme" title="切换明暗主题">☾</button>
     </div>
   </header>
@@ -323,6 +324,22 @@
 
   <script type="module" src="js/app.js"></script>
   <script>
+    /* App version badge — fetch version.json (hot-update dir first, then bundled root) */
+    fetch('/version.json?_=' + Date.now())
+      .then(r => r.ok ? r.json() : null)
+      .catch(() => null)
+      .then(data => {
+        const el = document.getElementById('app-version');
+        if (el) {
+          if (data && data.version) {
+            el.textContent = 'v' + data.version;
+            el.title = '当前 UI 版本 v' + data.version + (data.updatedAt ? '（' + new Date(data.updatedAt).toLocaleDateString('zh-CN') + ' 更新）' : '');
+          } else {
+            el.hidden = true;
+          }
+        }
+      });
+
     /* Theme toggle */
     const btnTheme = document.getElementById('btn-theme');
     const applyTheme = (light) => {
