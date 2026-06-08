@@ -236,7 +236,7 @@ export async function handleSimTradeFill(payload, opts) {
   const mid = (bid + ask) / 2;
   /** 一律以模拟推送价 trade.price 为分母：|盘口中间价 − 模拟价| / 模拟价 */
   const slipBookMidVsSim = slippageVsSimPrice(mid, simPx);
-  if (slipBookMidVsSim > opts.risk.maxSlippagePct) {
+  if (kind !== "close" && slipBookMidVsSim > opts.risk.maxSlippagePct) {
     opts.log?.(
       `[task ${taskId}] 盘口中间价相对模拟推送价偏离 ${(slipBookMidVsSim * 100).toFixed(3)}%（基准=模拟价 ${simPx}）超过上限 ${(opts.risk.maxSlippagePct * 100).toFixed(3)}%，跳过`,
       "err"
